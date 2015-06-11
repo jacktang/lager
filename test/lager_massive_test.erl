@@ -14,7 +14,7 @@
 
 %% API
 -export([start_apps/0, start/2, start/3, start_link/3]).
--export([start_trace_main/0, start_trace_lager/0, analyze/0]).
+-export([start_trace_lager/0, analyse/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -40,7 +40,7 @@ start(Num, Interval) ->
 start_trace_lager() ->
     fprof:trace([start, {procs, whereis(lager_event)}]).
 
-analyze() ->
+analyse() ->
     fprof:trace([stop]),
     fprof:profile(),
     fprof:analyse([totals, no_details]),
