@@ -69,7 +69,6 @@ start(Num, Interval, Msg) ->
                     lager:error("start massive test sup failed ~p", [Reason])
             end
     end,
-    fprof:trace([start, {procs, whereis(lager_massive_test_sup)}]),
     lists:foreach(
       fun({_Name, PId, _, _}) ->
               gen_server:cast(PId, stop)
