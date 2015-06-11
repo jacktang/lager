@@ -37,17 +37,14 @@ start_apps() ->
 start(Num, Interval) ->
     start(Num, Interval, sample_msg()).
 
-start_trace_main() ->
-    fprof:trace([start, {procs, whereis(lager_massive_test_sup)}]).
-
 start_trace_lager() ->
     fprof:trace([start, {procs, whereis(lager_event)}]).
 
 analyze() ->
     fprof:trace([stop]),
     fprof:profile(),
-    fprof:analyze([totals, no_details]).
-
+    fprof:analyse([totals, no_details]),
+    start(0, 100).
 
 start(Num, Interval, Msg) ->
     {NMsg, NArgs} =
@@ -68,6 +65,7 @@ start(Num, Interval, Msg) ->
                     lager:error("start massive test sup failed ~p", [Reason])
             end
     end,
+    fprof:trace([start, {procs, whereis(lager_massive_test_sup)}]),
     lists:foreach(
       fun({_Name, PId, _, _}) ->
               gen_server:cast(PId, stop)
