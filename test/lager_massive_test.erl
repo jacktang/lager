@@ -13,7 +13,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_apps/0, start/3, start_link/3]).
+-export([start_apps/0, start/2, start/3, start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -32,6 +32,8 @@ start_apps() ->
     application:start(goldrush),
     application:start(lager).
 
+start(Num, Interval) ->
+    start(Num, Interval, sample_msg()).
 
 start(Num, Interval, Msg) ->
     {NMsg, NArgs} =
@@ -65,6 +67,11 @@ start(Num, Interval, Msg) ->
                 [R|Acc]
         end
       end, [], lists:seq(1, Num)).
+
+sample_msg() ->
+    {"order ~p failed reason ~p", [{action_order,4779144,{strategy,'strategy_agent@strategy.lk.com',<<"strategy_agent@strategy.lk.com:998f9718f4a25846aa900d548c4a62c9">>},<<"strategy_agent@strategy.lk.com:998f9718f4a25846aa900d548c4a62c9">>,undefined,1,100008,<<"CNY">>,<<"if1506">>,1,1,57530,4,4,2,undefined,undefined,0,undefined,undefined,undefined,3,{strategy,'strategy_agent@strategy.lk.com'},undefined,undefined,1433984657,1433984657}, no_enough_expendable_fund]}.
+
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
