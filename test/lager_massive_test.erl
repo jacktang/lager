@@ -14,7 +14,7 @@
 
 %% API
 -export([start_apps/0, start/2, start/3, start_link/3]).
--export([start_trace_lager/0, analyse/0]).
+-export([start_trace_main/0, start_trace_lager/0, analyse/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -37,14 +37,18 @@ start_apps() ->
 start(Num, Interval) ->
     start(Num, Interval, sample_msg()).
 
+start_trace_main() ->
+    lager_massive_test_sup:start(),
+    fprof:trace([start, {procs, whereis(lager_massive_test_sup)}]).
+
 start_trace_lager() ->
     fprof:trace([start, {procs, whereis(lager_event)}]).
 
 analyse() ->
+    start(0, 100),
     fprof:trace([stop]),
     fprof:profile(),
-    fprof:analyse([totals, no_details]),
-    start(0, 100).
+    fprof:analyse([totals, no_details]).
 
 start(Num, Interval, Msg) ->
     {NMsg, NArgs} =
@@ -110,7 +114,7 @@ start_link(Msg, Args, Interval) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Msg, Args, Interval]) ->
-    self() ! log,
+    timer:send_interval(Interval, log),
     {ok, #state{msg = Msg, args = Args, interval = Interval}}.
 
 %%--------------------------------------------------------------------
@@ -156,9 +160,8 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(log, #state{msg = Msg, args = Args, interval = Interval} = State) ->
+handle_info(log, #state{msg = Msg, args = Args} = State) ->
     lager:info(Msg, Args),
-    erlang:send_after(Interval, self(), log),
     {noreply, State};
 handle_info(Info, State) ->
     lager:error("unexpected info msg ~p", [Info]),
