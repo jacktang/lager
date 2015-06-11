@@ -14,6 +14,7 @@
 
 %% API
 -export([start_apps/0, start/2, start/3, start_link/3]).
+-export([start_trace_main/0, start_trace_lager/0, analyze/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -35,6 +36,18 @@ start_apps() ->
 
 start(Num, Interval) ->
     start(Num, Interval, sample_msg()).
+
+start_trace_main() ->
+    fprof:trace([start, {procs, whereis(lager_massive_test_sup)}]).
+
+start_trace_lager() ->
+    fprof:trace([start, {procs, whereis(lager_event)}]).
+
+analyze() ->
+    fprof:trace([stop]),
+    fprof:profile(),
+    fprof:analyze([totals, no_details]).
+
 
 start(Num, Interval, Msg) ->
     {NMsg, NArgs} =
