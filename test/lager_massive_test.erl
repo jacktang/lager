@@ -38,7 +38,7 @@ start(Num, Interval) ->
     start(Num, Interval, sample_msg()).
 
 start_trace_main() ->
-    lager_massive_test_sup:start(),
+    lager_massive_test_sup:start_link(),
     fprof:trace([start, {procs, whereis(lager_massive_test_sup)}]).
 
 start_trace_lager() ->
