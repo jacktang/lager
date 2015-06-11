@@ -30,7 +30,8 @@ start_apps() ->
     application:start(syntax_tools),
     application:start(compiler),
     application:start(goldrush),
-    application:start(lager).
+    application:start(lager),
+    lager_massive_test_sup:start_link().
 
 start(Num, Interval) ->
     start(Num, Interval, sample_msg()).
