@@ -69,7 +69,7 @@ handle_event({log, Msg},
         true ->
             {ok, State#state{buffer=Buffer ++
                              [{lager_msg:severity_as_int(Msg),
-                               lager_msg:timestamp(Msg),
+                               lager_msg:datetime(Msg),
                                lager_msg:message(Msg), lager_msg:metadata(Msg)}]}};
         _ ->
             {ok, State#state{ignored=Ignored ++ [ignored]}}
@@ -109,7 +109,7 @@ print_bad_state() ->
 has_line_numbers() ->
     %% are we R15 or greater
     Rel = erlang:system_info(otp_release),
-    {match, [Major]} = re:run(Rel, "^R(\\d+)[A|B](|0(\\d))$", [{capture, [1], list}]),
+    {match, [Major]} = re:run(Rel, "(?|(^R(\\d+)[A|B](|0(\\d)))|(^(\\d+)$))", [{capture, [2], list}]),
     list_to_integer(Major) >= 15.
 
 not_running_test() ->
@@ -353,6 +353,107 @@ lager_test_() ->
                         ok
                 end
             },
+            {"tracing works with custom attributes and event stream processing",
+                fun() ->
+                        lager:set_loglevel(?MODULE, error),
+                        ?assertEqual({?ERROR bor ?CRITICAL bor ?ALERT bor ?EMERGENCY, []}, lager_config:get(loglevel)),
+                        lager_config:set(loglevel, {element(2, lager_util:config_to_mask(error)), []}),
+                        lager:info([{requestid, 6}], "hello world"),
+                        ?assertEqual(0, count()),
+                        lager:trace(?MODULE, [{requestid, '>', 5}, {requestid, '<', 7}, {foo, bar}], debug),
+                        lager:info([{requestid, 5}, {foo, bar}], "hello world"),
+                        lager:info([{requestid, 6}, {foo, bar}], "hello world"),
+                        ?assertEqual(1, count()),
+                        lager:clear_all_traces(),
+                        lager:trace(?MODULE, [{requestid, '>', 8}, {foo, bar}]),
+                        lager:info([{foo, bar}], "hello world"),
+                        lager:info([{requestid, 6}], "hello world"),
+                        lager:info([{requestid, 7}], "hello world"),
+                        lager:info([{requestid, 8}], "hello world"),
+                        lager:info([{requestid, 9}, {foo, bar}], "hello world"),
+                        lager:info([{requestid, 10}], "hello world"),
+                        ?assertEqual(2, count()),
+                        lager:trace(?MODULE, [{requestid, '>', 8}]),
+                        lager:info([{foo, bar}], "hello world"),
+                        lager:info([{requestid, 6}], "hello world"),
+                        lager:info([{requestid, 7}], "hello world"),
+                        lager:info([{requestid, 8}], "hello world"),
+                        lager:info([{requestid, 9}, {foo, bar}], "hello world"),
+                        lager:info([{requestid, 10}], "hello world"),
+                        ?assertEqual(4, count()),
+                        lager:trace(?MODULE, [{foo, '=', bar}]),
+                        lager:info([{foo, bar}], "hello world"),
+                        lager:info([{requestid, 6}], "hello world"),
+                        lager:info([{requestid, 7}], "hello world"),
+                        lager:info([{requestid, 8}], "hello world"),
+                        lager:info([{requestid, 9}, {foo, bar}], "hello world"),
+                        lager:info([{requestid, 10}], "hello world"),
+                        lager:trace(?MODULE, [{fu, '!'}]),
+                        lager:info([{foo, bar}], "hello world"),
+                        lager:info([{ooh, car}], "hello world"),
+                        lager:info([{fu, bar}], "hello world"),
+                        lager:trace(?MODULE, [{fu, '*'}]),
+                        lager:info([{fu, bar}], "hello world"),
+                        ?assertEqual(10, count()),
+                        lager:clear_all_traces(),
+                        lager:info([{requestid, 6}], "hello world"),
+                        ?assertEqual(10, count()),
+                        ok
+                end
+            },
+            {"tracing custom attributes works with event stream processing statistics and reductions",
+                fun() ->
+                        lager:set_loglevel(?MODULE, error),
+                        ?assertEqual({?ERROR bor ?CRITICAL bor ?ALERT bor ?EMERGENCY, []}, lager_config:get(loglevel)),
+                        lager_config:set(loglevel, {element(2, lager_util:config_to_mask(error)), []}),
+                        lager:info([{requestid, 6}], "hello world"),
+                        ?assertEqual(0, count()),
+                        lager:trace(?MODULE, [{beta, '*'}]),
+                        lager:trace(?MODULE, [{meta, "data"}]),
+                        lager:info([{meta, "data"}], "hello world"),
+                        lager:info([{beta, 2}], "hello world"),
+                        lager:info([{beta, 2.1}, {foo, bar}], "hello world"),
+                        lager:info([{meta, <<"data">>}], "hello world"),
+                        ?assertEqual(8, ?DEFAULT_TRACER:info(input)),
+                        ?assertEqual(6, ?DEFAULT_TRACER:info(output)),
+                        ?assertEqual(2, ?DEFAULT_TRACER:info(filter)),
+                        lager:clear_all_traces(),
+                        lager:trace(?MODULE, [{meta, "data"}]),
+                        lager:trace(?MODULE, [{beta, '>', 2}, {beta, '<', 2.12}]),
+                        lager:info([{meta, "data"}], "hello world"),
+                        lager:info([{beta, 2}], "hello world"),
+                        lager:info([{beta, 2.1}, {foo, bar}], "hello world"),
+                        lager:info([{meta, <<"data">>}], "hello world"),
+                        ?assertEqual(8, ?DEFAULT_TRACER:info(input)),
+                        ?assertEqual(4, ?DEFAULT_TRACER:info(output)),
+                        ?assertEqual(4, ?DEFAULT_TRACER:info(filter)),
+                        lager:clear_all_traces(),
+                        lager:trace_console([{beta, '>', 2}, {meta, "data"}]),
+                        lager:trace_console([{beta, '>', 2}, {beta, '<', 2.12}]),
+                        Reduced = {all,[{any,[{beta,'<',2.12},{meta,'=',"data"}]},
+                                              {beta,'>',2}]},
+                        ?assertEqual(Reduced, ?DEFAULT_TRACER:info('query')),
+
+                        lager:clear_all_traces(),
+                        lager:info([{requestid, 6}], "hello world"),
+                        ?assertEqual(5, count()),
+                        ok
+                end
+            },
+            {"persistent traces work",
+                fun() ->
+                        ?assertEqual(0, count()),
+                        lager:debug([{foo, bar}], "hello world"),
+                        ?assertEqual(0, count()),
+                        application:stop(lager),
+                        application:set_env(lager, traces, [{lager_test_backend, [{foo, bar}], debug}]),
+                        lager:start(),
+                        lager:debug([{foo, bar}], "hello world"),
+                        ?assertEqual(1, count()),
+                        application:unset_env(lager, traces),
+                        ok
+                end
+            },
             {"tracing honors loglevel",
                 fun() ->
                         lager:set_loglevel(?MODULE, error),
@@ -410,7 +511,7 @@ lager_test_() ->
             {"record printing fails gracefully when module is invalid",
                 fun() ->
                         spawn(fun() -> lager:info("State ~p", [lager:pr({state, 1}, not_a_module)]) end),
-                        timer:sleep(100),
+                        timer:sleep(1000),
                         {Level, _Time, Message, _Metadata}  = pop(),
                         ?assertMatch(Level, lager_util:level_to_num(info)),
                         ?assertEqual("State {state,1}", lists:flatten(Message)),
@@ -424,6 +525,33 @@ lager_test_() ->
                         ?assertEqual({?DEBUG bor ?INFO bor ?NOTICE bor ?WARNING bor ?ERROR bor ?CRITICAL bor ?ALERT bor ?EMERGENCY, []}, lager_config:get(loglevel)),
                         ok
                 end
+            },
+            {"metadata in the process dictionary works",
+                fun() ->
+                        lager:md([{platypus, gravid}, {sloth, hirsute}, {duck, erroneous}]),
+                        lager:info("I sing the animal kingdom electric!"),
+                        {_Level, _Time, _Message, Metadata}  = pop(),
+                        ?assertEqual(gravid, proplists:get_value(platypus, Metadata)),
+                        ?assertEqual(hirsute, proplists:get_value(sloth, Metadata)),
+                        ?assertEqual(erroneous, proplists:get_value(duck, Metadata)),
+                        ?assertEqual(undefined, proplists:get_value(eagle, Metadata)),
+                        lager:md([{platypus, gravid}, {sloth, hirsute}, {eagle, superincumbent}]),
+                        lager:info("I sing the animal kingdom dielectric!"),
+                        {_Level2, _Time2, _Message2, Metadata2}  = pop(),
+                        ?assertEqual(gravid, proplists:get_value(platypus, Metadata2)),
+                        ?assertEqual(hirsute, proplists:get_value(sloth, Metadata2)),
+                        ?assertEqual(undefined, proplists:get_value(duck, Metadata2)),
+                        ?assertEqual(superincumbent, proplists:get_value(eagle, Metadata2)),
+                        ok
+                end
+            },
+            {"can't store invalid metadata",
+                fun() ->
+                        ?assertEqual(ok, lager:md([{platypus, gravid}, {sloth, hirsute}, {duck, erroneous}])),
+                        ?assertError(badarg, lager:md({flamboyant, flamingo})),
+                        ?assertError(badarg, lager:md("zookeeper zephyr")),
+                        ok
+                end
             }
         ]
     }.
@@ -433,11 +561,12 @@ setup() ->
     application:load(lager),
     application:set_env(lager, handlers, [{?MODULE, info}]),
     application:set_env(lager, error_logger_redirect, false),
-    application:start(lager),
+    lager:start(),
     gen_event:call(lager_event, ?MODULE, flush).
 
 cleanup(_) ->
     application:stop(lager),
+    application:stop(goldrush),
     error_logger:tty(true).
 
 
@@ -486,12 +615,13 @@ error_logger_redirect_crash_test_() ->
                 application:load(lager),
                 application:set_env(lager, error_logger_redirect, true),
                 application:set_env(lager, handlers, [{?MODULE, error}]),
-                application:start(lager),
+                lager:start(),
                 crash:start()
         end,
 
         fun(_) ->
                 application:stop(lager),
+                application:stop(goldrush),
                 case whereis(crash) of
                     undefined -> ok;
                     Pid -> exit(Pid, kill)
@@ -533,7 +663,7 @@ error_logger_redirect_test_() ->
                 application:load(lager),
                 application:set_env(lager, error_logger_redirect, true),
                 application:set_env(lager, handlers, [{?MODULE, info}]),
-                application:start(lager),
+                lager:start(),
                 lager:log(error, self(), "flush flush"),
                 timer:sleep(100),
                 gen_event:call(lager_event, ?MODULE, flush)
@@ -541,6 +671,7 @@ error_logger_redirect_test_() ->
 
         fun(_) ->
                 application:stop(lager),
+                application:stop(goldrush),
                 error_logger:tty(true)
         end,
         [
@@ -1030,13 +1161,15 @@ async_threshold_test_() ->
                 error_logger:tty(false),
                 application:load(lager),
                 application:set_env(lager, error_logger_redirect, false),
-                application:set_env(lager, async_threshold, 10),
+                application:set_env(lager, async_threshold, 2),
+                application:set_env(lager, async_threshold_window, 1),
                 application:set_env(lager, handlers, [{?MODULE, info}]),
-                application:start(lager)
+                lager:start()
         end,
         fun(_) ->
                 application:unset_env(lager, async_threshold),
                 application:stop(lager),
+                application:stop(goldrush),
                 error_logger:tty(true)
         end,
         [
@@ -1046,10 +1179,11 @@ async_threshold_test_() ->
                         ?assertEqual(true, lager_config:get(async)),
 
                         %% put a ton of things in the queue
-                        Workers = [spawn_monitor(fun() -> [lager:info("hello world") || _ <- lists:seq(1, 1000)] end) || _ <- lists:seq(1, 10)],
+                        Workers = [spawn_monitor(fun() -> [lager:info("hello world") || _ <- lists:seq(1, 1000)] end) || _ <- lists:seq(1, 15)],
 
                         %% serialize on mailbox
                         _ = gen_event:which_handlers(lager_event),
+                        timer:sleep(500),
                         %% there should be a ton of outstanding messages now, so async is false
                         ?assertEqual(false, lager_config:get(async)),
                         %% wait for all the workers to return, meaning that all the messages have been logged (since we're in sync mode)
@@ -1057,7 +1191,9 @@ async_threshold_test_() ->
                         %% serialize ont  the mailbox again
                         _ = gen_event:which_handlers(lager_event),
                         %% just in case...
-                        timer:sleep(100),
+                        timer:sleep(1000),
+                        lager:info("hello world"),
+                        _ = gen_event:which_handlers(lager_event),
 
                         %% async is true again now that the mailbox has drained
                         ?assertEqual(true, lager_config:get(async)),
@@ -1074,6 +1210,62 @@ collect_workers(Workers) ->
         {'DOWN', Ref, _, _, _} ->
             collect_workers(lists:keydelete(Ref, 2, Workers))
     end.
+
+produce_n_error_logger_msgs(N) ->
+    lists:foreach(fun (K) ->
+            error_logger:error_msg("Foo ~p!", [K])
+        end,
+        lists:seq(0, N-1)
+    ).
+
+high_watermark_test_() ->
+    {foreach,
+        fun() ->
+            error_logger:tty(false),
+            application:load(lager),
+            application:set_env(lager, error_logger_redirect, true),
+            application:set_env(lager, handlers, [{lager_test_backend, info}]),
+            application:set_env(lager, async_threshold, undefined),
+            lager:start()
+        end,
+        fun(_) ->
+            application:stop(lager),
+            error_logger:tty(true)
+        end,
+        [
+            {"Nothing dropped when error_logger high watermark is undefined",
+                fun () ->
+                    ok = error_logger_lager_h:set_high_water(undefined),
+                    timer:sleep(100),
+                    produce_n_error_logger_msgs(10),
+                    timer:sleep(500),
+                    ?assert(count() >= 10)
+                end
+            },
+            {"Mostly dropped according to error_logger high watermark",
+                fun () ->
+                    ok = error_logger_lager_h:set_high_water(5),
+                    timer:sleep(100),
+                    produce_n_error_logger_msgs(50),
+                    timer:sleep(1000),
+                    ?assert(count() < 20)
+                end
+            },
+            {"Non-notifications are not dropped",
+                fun () ->
+                    ok = error_logger_lager_h:set_high_water(2),
+                    timer:sleep(100),
+                    spawn(fun () -> produce_n_error_logger_msgs(300) end),
+                    timer:sleep(50),
+                    %% if everything were dropped, this call would be dropped
+                    %% too, so lets hope it's not
+                    ?assert(is_integer(count())),
+                    timer:sleep(1000),
+                    ?assert(count() < 10)
+                end
+            }
+        ]
+    }.
 
 -endif.
 

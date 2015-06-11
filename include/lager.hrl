@@ -16,6 +16,7 @@
 
 
 -define(DEFAULT_TRUNCATION, 4096).
+-define(DEFAULT_TRACER, lager_default_tracer).
 
 -define(LEVELS,
     [debug, info, notice, warning, error, critical, alert, emergency, none]).
@@ -59,7 +60,6 @@
 
 -define(NOTIFY(Level, Pid, Format, Args),
     gen_event:notify(lager_event, {log, lager_msg:new(io_lib:format(Format, Args),
-            lager_util:format_time(),
             Level,
             [{pid,Pid},{line,?LINE},{file,?FILE},{module,?MODULE}],
             [])}
@@ -84,7 +84,7 @@
     %% from a gen_event handler
     spawn(fun() ->
             case catch(gen_event:which_handlers(lager_event)) of
-                X when X == []; X == {'EXIT', noproc} ->
+                X when X == []; X == {'EXIT', noproc}; X == [lager_backend_throttle] ->
                     %% there's no handlers yet or lager isn't running, try again
                     %% in half a second.
                     timer:sleep(500),

@@ -30,6 +30,8 @@
 %% @private
 parse_transform(AST, Options) ->
     TruncSize = proplists:get_value(lager_truncation_size, Options, ?DEFAULT_TRUNCATION),
+    Enable = proplists:get_value(lager_print_records_flag, Options, true),
+    put(print_records_flag, Enable),
     put(truncation_size, TruncSize),
     erlang:put(records, []),
     %% .app file should either be in the outdir, or the same dir as the source file
@@ -37,7 +39,12 @@ parse_transform(AST, Options) ->
     walk_ast([], AST).
 
 walk_ast(Acc, []) ->
-    insert_record_attribute(Acc);
+    case get(print_records_flag) of
+        true ->
+            insert_record_attribute(Acc);
+        false ->
+            lists:reverse(Acc)
+    end;
 walk_ast(Acc, [{attribute, _, module, {Module, _PmodArgs}}=H|T]) ->
     %% A wild parameterized module appears!
     put(module, Module),
@@ -89,7 +96,9 @@ transform_statement({call, Line, {remote, _Line1, {atom, _Line2, lager},
                         {cons, Line, {tuple, Line, [
                                     {atom, Line, node},
                                     {call, Line, {atom, Line, node}, []}]},
-                         {nil, Line}}}}}},
+                        %% get the metadata with lager:md(), this will always return a list so we can use it as the tail here
+                        {call, Line, {remote, Line, {atom, Line, lager}, {atom, Line, md}}, []}}}}}},
+                            %{nil, Line}}}}}}},
             DefaultAttrs = case erlang:get(application) of
                 undefined ->
                     DefaultAttrs0;
@@ -151,7 +160,7 @@ transform_statement({call, Line, {remote, _Line1, {atom, _Line2, lager},
                         [],
                         %% trick the linter into avoiding a 'term constructed by not used' error:
                         %% (fun() -> {error, lager_not_running} end)();
-                        [{call,9, {'fun',9, {clauses, [{clause,9,[],[], [{tuple,9,[{atom,9,error},{atom,9,lager_not_running}]}]}]}}, []}]},
+                        [{call, Line, {'fun', Line, {clauses, [{clause, Line, [],[], [{tuple, Line, [{atom, Line, error},{atom, Line, lager_not_running}]}]}]}}, []}]},
                     %% If we care about the loglevel, or there's any traces installed, we have do more checking
                     %% {Level, Traces} when (Level band SeverityAsInt) /= 0 orelse Traces /= [] ->
                     {clause, Line,

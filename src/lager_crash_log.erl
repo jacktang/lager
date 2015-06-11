@@ -45,14 +45,14 @@
 -export([start_link/5, start/5]).
 
 -record(state, {
-        name,
-        fd,
-        inode,
-        fmtmaxbytes,
-        size,
-        date,
-        count,
-        flap=false
+        name :: string(),
+        fd :: pid(),
+        inode :: integer(),
+        fmtmaxbytes :: integer(),
+        size :: integer(),
+        date :: undefined | string(),
+        count :: integer(),
+        flap=false :: boolean()
 }).
 
 %% @private
@@ -66,7 +66,8 @@ start(Filename, MaxBytes, Size, Date, Count) ->
             Date, Count], []).
 
 %% @private
-init([Filename, MaxBytes, Size, Date, Count]) ->
+init([RelFilename, MaxBytes, Size, Date, Count]) ->
+    Filename = lager_util:expand_path(RelFilename),
     case lager_util:open_logfile(Filename, false) of
         {ok, {FD, Inode, _}} ->
             schedule_rotation(Date),
@@ -95,7 +96,7 @@ handle_cast(_Request, State) ->
 
 %% @private
 handle_info(rotate, #state{name=Name, count=Count, date=Date} = State) ->
-    lager_util:rotate_logfile(Name, Count),
+    _ = lager_util:rotate_logfile(Name, Count),
     schedule_rotation(Date),
     {noreply, State};
 handle_info(_Info, State) ->
@@ -118,7 +119,7 @@ schedule_rotation(Date) ->
 %% ===== Begin code lifted from riak_err =====
 
 -spec limited_fmt(string(), list(), integer()) -> iolist().
-%% @doc Format Fmt and Args similar to what io_lib:format/2 does but with 
+%% @doc Format Fmt and Args similar to what io_lib:format/2 does but with
 %%      limits on how large the formatted string may be.
 %%
 %% If the Args list's size is larger than TermMaxSize, then the
@@ -188,7 +189,7 @@ do_log({log, Event}, #state{name=Name, fd=FD, inode=Inode, flap=Flap,
         {error, _GL, {Pid1, Fmt, Args}} ->
             {"ERROR REPORT", Pid1, limited_fmt(Fmt, Args, FmtMaxBytes), true};
         {error_report, _GL, {Pid1, std_error, Rep}} ->
-            {"ERROR REPORT", Pid1, limited_str(Rep, FmtMaxBytes), true};
+            {"ERROR REPORT", Pid1, limited_str(Rep, FmtMaxBytes) ++ "\n", true};
         {error_report, _GL, Other} ->
             perhaps_a_sasl_report(error_report, Other, FmtMaxBytes);
         _ ->
@@ -199,15 +200,17 @@ do_log({log, Event}, #state{name=Name, fd=FD, inode=Inode, flap=Flap,
         true ->
             case lager_util:ensure_logfile(Name, FD, Inode, false) of
                 {ok, {_, _, Size}} when RotSize /= 0, Size > RotSize ->
-                    lager_util:rotate_logfile(Name, Count),
+                    _ = lager_util:rotate_logfile(Name, Count),
                     handle_cast({log, Event}, State);
                 {ok, {NewFD, NewInode, _Size}} ->
                     {Date, TS} = lager_util:format_time(
                         lager_stdlib:maybe_utc(erlang:localtime())),
                     Time = [Date, " ", TS," =", ReportStr, "====\n"],
                     NodeSuffix = other_node_suffix(Pid),
-                    Msg = io_lib:format("~s~ts~s", [Time, MsgStr, NodeSuffix]),
-                    case file_write(NewFD, Msg) of
+
+                    Msg = io_lib:format("~s~s~s", [Time, MsgStr, NodeSuffix]),
+                    case file:write(NewFD, unicode:characters_to_binary(Msg)) of
+
                         {error, Reason} when Flap == false ->
                             ?INT_LOG(error, "Failed to write log message to file ~s: ~s",
                                 [Name, file:format_error(Reason)]),
@@ -245,7 +248,7 @@ filesystem_test_() ->
                 application:set_env(lager, handlers, [{lager_test_backend, info}]),
                 application:set_env(lager, error_logger_redirect, true),
                 application:unset_env(lager, crash_log),
-                application:start(lager),
+                lager:start(),
                 timer:sleep(100),
                 lager_test_backend:flush()
         end,
@@ -257,6 +260,7 @@ filesystem_test_() ->
                 end,
                 file:delete("crash_test.log"),
                 application:stop(lager),
+                application:stop(goldrush),
                 error_logger:tty(true)
         end,
         [
@@ -339,4 +343,3 @@ filesystem_test_() ->
     }.
 
 -endif.
-
