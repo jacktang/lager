@@ -13,7 +13,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_apps/0, start/2, start/3, start_link/3]).
+-export([start_apps/0, start/3, start/4, start_link/4]).
 -export([start_trace_main/0, start_trace_lager/0, analyse/0]).
 
 %% gen_server callbacks
@@ -22,7 +22,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {msg, args, interval}).
+-record(state, {msg, args, level, interval}).
 
 %%%===================================================================
 %%% API
@@ -34,8 +34,8 @@ start_apps() ->
     application:start(lager),
     lager_massive_test_sup:start_link().
 
-start(Num, Interval) ->
-    start(Num, Interval, sample_msg()).
+start(Num, Interval, Level) ->
+    start(Num, Interval, Level, sample_msg()).
 
 start_trace_main() ->
     lager_massive_test_sup:start_link(),
@@ -45,12 +45,12 @@ start_trace_lager() ->
     fprof:trace([start, {procs, whereis(lager_event)}]).
 
 analyse() ->
-    start(0, 100),
+    start(0, 100, info),
     fprof:trace([stop]),
     fprof:profile(),
     fprof:analyse([totals, no_details]).
 
-start(Num, Interval, Msg) ->
+start(Num, Interval, Level, Msg) ->
     {NMsg, NArgs} =
         case Msg of
             {M, Args} ->
@@ -75,7 +75,7 @@ start(Num, Interval, Msg) ->
       end, supervisor:which_children(lager_massive_test_sup)),
     lists:foldl(
       fun(_, Acc) ->
-        case supervisor:start_child(lager_massive_test_sup, [NMsg, NArgs, Interval]) of
+        case supervisor:start_child(lager_massive_test_sup, [NMsg, NArgs, Level, Interval]) of
             {ok, _} ->
                 Acc;
             {error, R} ->
@@ -94,8 +94,8 @@ sample_msg() ->
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Msg, Args, Interval) ->
-    gen_server:start_link(?MODULE, [Msg, Args, Interval], []).
+start_link(Msg, Args, Level, Interval) ->
+    gen_server:start_link(?MODULE, [Msg, Args, Level, Interval], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -112,9 +112,9 @@ start_link(Msg, Args, Interval) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Msg, Args, Interval]) ->
+init([Msg, Args, Level, Interval]) ->
     timer:send_interval(Interval, log),
-    {ok, #state{msg = Msg, args = Args, interval = Interval}}.
+    {ok, #state{msg = Msg, args = Args, level = Level, interval = Interval}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -159,8 +159,13 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(log, #state{msg = Msg, args = Args} = State) ->
-    lager:info(Msg, Args),
+handle_info(log, #state{msg = Msg, args = Args, level = Level} = State) ->
+    case Level of
+        info ->
+            lager:info(Msg, Args);
+        error ->
+            lager:error(Msg, Args)
+    end,
     {noreply, State};
 handle_info(Info, State) ->
     lager:error("unexpected info msg ~p", [Info]),
